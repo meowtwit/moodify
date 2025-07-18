@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>表情認識＆音楽プレイヤー</title>
+  <style>
+    body { display:flex;flex-direction:column;align-items:center;font-family:sans-serif;margin:20px; }
+    video { border:2px solid #666;border-radius:4px;margin-top:12px; display:none; }
+    #expression-box, #countdown-box {
+      margin-top:12px;
+      padding:8px 12px;
+      border:2px solid #4CAF50;
+      border-radius:4px;
+      font-size:1.2rem;
+      background:#f9fff9;
+      min-width:240px;
+      text-align:center;
+    }
+    button {
+      padding:8px 16px;
+      font-size:1rem;
+      border:none;
+      border-radius:4px;
+      background:#2196F3;
+      color:#fff;
+      cursor:pointer;
+      margin:6px;
+    }
+    button:disabled { opacity:0.5;cursor:default; }
+  </style>
+  <!-- face-api.js 読み込み -->
+  <script src="https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <h2>表情で音楽を流すデモ</h2>
+  <button id="cam-start" disabled>モデルロード中…</button>
+  <button id="measure-btn" disabled>測定スタート</button>
+  <video id="video" width="640" height="480" autoplay muted playsinline></video>
+  <div id="expression-box">現在の表情：--</div>
+  <!-- カウントダウン表示用 -->
+  <div id="countdown-box">残り: --</div>
+  <audio id="audio-player"></audio>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const camBtn = document.getElementById('cam-start');
+      const measBtn = document.getElementById('measure-btn');
+      const video = document.getElementById('video');
+      const box = document.getElementById('expression-box');
+      const countdown = document.getElementById('countdown-box');
+      const audio = document.getElementById('audio-player');
+
+      const LABEL_MAP = { angry:'怒り', happy:'喜び', sad:'悲しみ', surprised:'驚き', neutral:'無表情' };
+      const TARGETS = Object.keys(LABEL_MAP);
+      const MUSIC_MAP = {
+        angry: 'audio/angry.mp3',
+        happy: 'audio/happy.mp3',
+        sad: 'audio/sad.mp3',
+        surprised: 'audio/surprised.mp3',
+        neutral: 'audio/neutral.mp3'
+      };
+
+      // モデルロード
+      Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri('models'),
+        faceapi.nets.faceExpressionNet.loadFromUri('models')
+      ]).then(() => {
+        camBtn.disabled = false;
+        camBtn.textContent = 'カメラを開始';
+      }).catch(err => {
+        console.error('モデルロード失敗:', err);
+        camBtn.textContent = 'モデルロード失敗';
+      });
+
+      // カメラ起動
+      camBtn.addEventListener('click', async () => {
+        camBtn.disabled = true;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          video.srcObject = stream;
+          video.style.display = 'block';
+          box.textContent = 'カメラ起動完了';
+          measBtn.disabled = false;
+        } catch (err) {
+          console.error('カメラ起動失敗:', err);
+          box.textContent = `カメラ起動失敗: ${err.name}`;
+          camBtn.disabled = false;
+        }
+      });
+
+      // 測定処理
+      measBtn.addEventListener('click', () => {
+        measBtn.disabled = true;
+        box.textContent = '測定中…';
+        let timeLeft = 10;
+        countdown.textContent = `残り: ${timeLeft}s`;
+        const options = new faceapi.TinyFaceDetectorOptions({ inputSize:224 });
+        const counts = { angry:0, happy:0, sad:0, surprised:0, neutral:0 };
+
+        // 200msごとの表情チェック
+        const checkInterval = setInterval(async () => {
+          const result = await faceapi.detectSingleFace(video, options).withFaceExpressions();
+          if (!result) return;
+          const [label] = Object.entries(result.expressions)
+            .filter(([l])=>TARGETS.includes(l))
+            .sort((a,b)=>b[1]-a[1])[0];
+          counts[label]++;
+        }, 200);
+
+        // 1秒ごとのカウントダウン更新
+        const countdownInterval = setInterval(() => {
+          timeLeft -= 1;
+          countdown.textContent = `残り: ${timeLeft}s`;
+          if (timeLeft <= 0) clearInterval(countdownInterval);
+        }, 1000);
+
+        // 10秒後に測定完了
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          clearInterval(countdownInterval);
+          // 最頻出表情決定
+          const detected = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+          box.textContent = `測定結果: ${LABEL_MAP[detected]}`;
+          countdown.textContent = '測定終了';
+          // 音楽再生
+          audio.src = MUSIC_MAP[detected] || '';
+          audio.play();
+          measBtn.disabled = false;
+        }, 10000);
+      });
+    });
+  </script>
+</body>
+</html>
